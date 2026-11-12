@@ -1,0 +1,136 @@
+<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Four Kings</title>
+<style>
+body{margin:0;font:14px system-ui,sans-serif;background:#1c1710;color:#f1e6c8}
+.s{display:none;padding:20px;max-width:760px;margin:auto}.s.on{display:block}
+h1{font:700 46px Georgia,serif;text-align:center;color:#e8c15a;margin:30px 0;text-shadow:0 2px 6px #000}
+button,input{font:inherit;padding:8px 14px;margin:4px;border-radius:6px;border:1px solid #8a6d2b;background:#3a2e17;color:#f1e6c8}
+button{cursor:pointer}button:hover{background:#5a4620}button:disabled{opacity:.4}
+.c{text-align:center}.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}.card{padding:14px;border-radius:8px;border:4px solid;cursor:pointer;background:#2a2112}
+#game.on{display:flex;height:100vh;max-width:none;padding:0;margin:0}
+#map{flex:1;overflow:auto}#side{width:300px;overflow:auto;padding:8px;background:#241c0f;box-sizing:border-box}
+@media(max-width:800px){#game.on{flex-direction:column}#map{flex:none;height:58vh}#side{width:100%;height:42vh}.cards{grid-template-columns:1fr}h1{font-size:34px}}
+#toast{position:fixed;top:8px;left:50%;transform:translateX(-50%);background:#7a1f1f;padding:0 12px;border-radius:6px;z-index:9}
+#over{position:fixed;inset:0;background:#000c;display:none;align-items:center;justify-content:center;z-index:5}
+.log{font-size:12px;color:#cdbf9a}.box{background:#33281300;border-top:1px solid #5a4620;margin-top:8px;padding-top:6px}
+</style></head><body>
+<div id=toast></div>
+<div id=menu class="s on"><h1>⚔ FOUR KINGS ⚔</h1><div class=c>
+<input id=name placeholder="Your name" maxlength=16><br>
+<button onclick="go('create',2)">Create 2-Player Game</button><button onclick="go('create',4)">Create 4-Player Game</button><br>
+<input id=code placeholder="Room code" maxlength=5 style="text-transform:uppercase"><button onclick="go('join')">Join Game</button><br>
+<button onclick="show('help')">How to Play</button><button onclick="show('settings');$('mt').checked=mute;$('vl').value=vol">Settings</button></div></div>
+<div id=help class=s><h1>How to Play</h1><p>• Play 2 players (a duel from opposite corners) or 4 players: the host chooses when creating the game. In 2-player games just destroy the enemy Town Hall.<br>• Destroy all enemy Town Halls. Last king standing wins.<br>• Rounds last 180 s. Everyone plans at once; orders resolve together when all players press <b>End Turn</b> or time runs out.<br>• You have 6 Action Points (8 after upgrading the Town Hall). Each move or attack costs 1 AP (Giant: 2).<br>• Click your unit, then click a blue cell to move or an enemy in range to attack. Click a Barracks to recruit; click buildings/units to upgrade. Cancel queued orders with ✕ (AP and gold are refunded).<br>• Gold: Town Hall +1, Gold Mine +7 (+9 upgraded) per round, gold deposits +3, kills +1, houses +4, Town Hall +25.<br>• Workshop (W) builds the Cannon (stationary, range 5, 2 AP per shot); upgrade it for 10g to build the Ram (buildings only, 35 dmg, move 2 AP / attack 3 AP) and Catapult (range 14, move 2 AP / attack 4 AP).<br>• Each kingdom is walled on its map-facing sides with two gates (G); only the owner's units can pass through its gates. Towers (▲) see 6 cells. Archers and crossbows cannot shoot through walls or trees (siege weapons can). Cannons are placed on walls. Walls upgrade for 1g (100 HP), gates for 2g (80 HP).<br>• Barracks Lv3 trains the Healer (heals an ally within 2 cells for 3 HP) and the Mage (range 3, 3×3 blast: 9 dmg centre, 8 around; also hurts your own units).<br>• Sounds are synthesized (no music): birds in sunny weather, wind, rain from round 4, combat and explosions. Mute in Settings or with the speaker button.<br>• Fog of war hides enemy units outside your vision.<br>• Four 2×2 Control Points (gold border) give +3 gold per round to whoever holds one uncontested. Ownership is only shown inside your vision (? = unknown, ⚔ = contested).<br>• Fireball unlocks in round 6 (3×3, 10 dmg), Fire Arrows in round 8 (4×4, 6 dmg).<br>• If you disconnect, reopen the page: your kingdom is kept for 5 minutes.</p><button onclick="show('menu')">Back</button></div>
+<div id=settings class=s><h1>Settings</h1><div class=c><label><input type=checkbox id=mt onchange="setMute(this.checked)"> Mute all sounds</label><br><br>Volume <input type=range id=vl min=0 max=1 step=.05 value=.6 oninput="setVol(this.value)"><br><br><button onclick="show('menu')">Back</button></div></div>
+<div id=lobby class=s><h1>Lobby</h1><div class=c>Invite link: <input id=link readonly size=34><button onclick="navigator.clipboard.writeText($('link').value);toast('Link copied')">Copy Link</button></div>
+<div class=cards id=cards></div><div class=c><button id=startb onclick="tx({t:'start'})">Start Game</button><div id=pl></div></div></div>
+<div id=game class=s><div id=map><div style="position:relative;width:800px;height:800px"><canvas id=cv width=800 height=800></canvas><canvas id=fx width=800 height=800 style="position:absolute;left:0;top:0;pointer-events:none"></canvas></div></div><div id=side></div></div>
+<div id=over><div class=c style="background:#2a2112;padding:30px;border-radius:10px"><h1 id=ow></h1><button onclick="localStorage.removeItem('fk');location='/'">Return to Main Menu</button><button onclick="$('over').style.display='none'">View Final Battlefield</button></div></div>
+<script>
+const N=50,C=16,KN=['Blue & White Kingdom','Purple Kingdom','Yellow & Red Kingdom','Orange & Black Kingdom'],C1=['#3b82f6','#8b5cf6','#eab308','#f97316'],C2=['#fff','#d8b4fe','#dc2626','#111'];
+const LB={TownHall:'TH',Barracks:'B',Workshop:'Wk',GoldMine:'M',House:'H',TrainingYard:'Y',Wall:'',Gate:'G',Tower:'▲'};
+const RC={Swordsman:[2,1],Archer:[3,1],Horseman:[5,1],Spearman:[4,2],Crossbowman:[6,2],AxeKnight:[6,2],Giant:[12,3],Cannon:[9,1,1],Ram:[18,2,1],Catapult:[25,2,1],Healer:[7,3],Mage:[11,3]},UPC={Swordsman:3,Archer:4,Crossbowman:4,AxeKnight:2,Ram:4};
+const $=i=>document.getElementById(i),cv=$('cv'),g=cv.getContext('2d');
+let ws,S,sel,mode,mem=new Map(),ex=new Uint8Array(N*N),off=0,tt;
+const show=i=>document.querySelectorAll('.s').forEach(e=>e.classList.toggle('on',e.id==i));
+const ld=()=>{try{return JSON.parse(localStorage.getItem('fk'))}catch{}};
+function toast(t){$('toast').textContent=t;clearTimeout(tt);tt=setTimeout(()=>$('toast').textContent='',4000)}
+const tx=o=>ws&&ws.readyState==1&&ws.send(JSON.stringify(o));
+function conn(f){ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host);ws.onopen=f;ws.onmessage=e=>on(JSON.parse(e.data));
+ ws.onclose=()=>{if(ld()){toast('Connection lost. Reconnecting...');setTimeout(()=>conn(rejoin),2000)}}}
+const rejoin=()=>{const s=ld();s&&tx({t:'join',room:s.room,token:s.token,name:s.name})};
+function go(w,size){const name=$('name').value||'Player',s=ld(),room=$('code').value.toUpperCase();
+ conn(()=>tx(w=='create'?{t:'create',name,size}:{t:'join',room,name,token:s&&s.room==room?s.token:null}))}
+const q=new URLSearchParams(location.search).get('r'),sv=ld();
+if(q)$('code').value=q;
+if(sv&&(!q||sv.room==q))conn(rejoin);
+function on(m){
+ if(m.t=='err'){toast(m.m);if(/not found|already started/.test(m.m))localStorage.removeItem('fk');return}
+ if(m.t=='me'){localStorage.setItem('fk',JSON.stringify({room:m.room,token:m.token,name:m.name}));history.replaceState(0,'','?r='+m.room);return}
+ if(m.t=='lobby'){show('lobby');$('link').value=location.origin+'/?r='+m.room;
+  $('cards').innerHTML=[0,1,2,3].map(k=>{const p=m.players.find(p=>p.k==k);
+   return`<div class=card style="border-color:${C1[k]}" onclick="${p?'':`tx({t:'pick',k:${k}})`}"><b>${KN[k]}</b><br><span style="color:${C1[k]}">■</span> <span style="color:${C2[k]}">■</span><br>${p?'Occupied: '+p.name+(p.on?'':' (offline)'):'Available'}</div>`}).join('');
+  $('pl').innerHTML=m.size+'-player game · Players ('+m.players.length+'/'+m.size+'): '+m.players.map(p=>p.name).join(', ');
+  $('startb').style.display=m.host?'':'none';return}
+ S=m;off=m.now-Date.now();S.ds=new Set(m.dep);fxStep();
+ for(let i=0;i<N*N;i++)if(m.vis[i]=='1')ex[i]=1;
+ const ids=new Set(m.b.map(b=>b.id));for(const b of m.b)mem.set(b.id,b);
+ for(const[id,b]of mem)if(m.vis[b.y*N+b.x]=='1'&&!ids.has(id))mem.delete(id);
+ show('game');$('game').classList.add('on');render();
+ if(m.over){$('ow').textContent='🏆 '+(m.winner>=0?KN[m.winner]+' ('+m.wname+') wins!':'Draw');$('over').style.display='flex'}}
+const pp=u=>{let x=u.x,y=u.y;for(const o of S.orders)if(o.k=='move'&&o.id==u.id){x=o.x;y=o.y}return[x,y]};
+const ucost=b=>b.t=='TownHall'&&b.lv<2?8:b.t=='GoldMine'&&b.lv<2?5:b.t=='Barracks'&&b.lv<3?[0,6,10][b.lv]:b.t=='Workshop'&&b.lv<2?10:b.t=='Wall'&&b.lv<2?1:b.t=='Gate'&&b.lv<2?2:0;
+function reach(u){const[sx,sy]=pp(u),d=new Map([[sy*N+sx,0]]),Q=[[sx,sy]];
+ const bl=(x,y)=>x<0||y<0||x>=N||y>=N||S.terr[y*N+x]!='0'||S.b.some(b=>b.x==x&&b.y==y&&!(b.t=='Gate'&&b.o==S.k))||S.u.some(v=>v.x==x&&v.y==y&&v.id!=u.id);
+ while(Q.length){const[x,y]=Q.shift(),dd=d.get(y*N+x);if(dd>=u.mv)continue;for(const[a,b]of[[1,0],[-1,0],[0,1],[0,-1]]){const X=x+a,Y=y+b,i=Y*N+X;if(!d.has(i)&&!bl(X,Y)){d.set(i,dd+1);Q.push([X,Y])}}}return d}
+function draw(){const V=S.vis;g.clearRect(0,0,800,800);
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=y*N+x;if(!ex[i]){g.fillStyle='#111';g.fillRect(x*C,y*C,C,C);continue}
+  const t=S.terr[i];g.fillStyle=t=='1'?'#2f5d2a':t=='2'?'#3a6ea5':(x+y)%2?'#6b9b4a':'#689846';g.fillRect(x*C,y*C,C,C);
+  if(t=='1'){g.fillStyle='#1d3d1a';g.beginPath();g.arc(x*C+8,y*C+8,6,0,7);g.fill()}
+  if(S.ds.has(i)){g.fillStyle='#ffd23c';g.beginPath();g.arc(x*C+8,y*C+8,4,0,7);g.fill()}}
+ const bar=(x,y,h,m)=>{g.fillStyle='#400';g.fillRect(x*C,y*C,C,3);g.fillStyle='#4c4';g.fillRect(x*C,y*C,C*h/m,3)};
+ for(const b of mem.values()){g.fillStyle=b.t=='Wall'?'#8a8a8a':b.t=='Gate'?'#a0703a':C1[b.o];g.fillRect(b.x*C+1,b.y*C+1,C-2,C-2);g.strokeStyle=C2[b.o];g.strokeRect(b.x*C+1.5,b.y*C+1.5,C-3,C-3);
+  g.fillStyle=C2[b.o]=='#111'||C2[b.o]=='#dc2626'?'#fff':'#000';g.font='bold 10px sans-serif';g.fillText(LB[b.t],b.x*C+4,b.y*C+12);if(b.hp<b.mh)bar(b.x,b.y,b.hp,b.mh)}
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=y*N+x;if(ex[i]&&V[i]=='0'){g.fillStyle='rgba(0,0,0,.5)';g.fillRect(x*C,y*C,C,C)}}
+ for(const c of S.cp){g.fillStyle=c.o>=0?C1[c.o]+'aa':'rgba(150,150,150,.55)';g.fillRect(c.x*C,c.y*C,2*C,2*C);g.strokeStyle='#ffd23c';g.lineWidth=2;g.strokeRect(c.x*C+1,c.y*C+1,2*C-2,2*C-2);g.lineWidth=1;g.fillStyle='#000';g.font='bold 14px sans-serif';g.fillText(c.cont?'⚔':c.o==-2?'?':c.o==-1?'○':'★',c.x*C+10,c.y*C+22)}
+ const su=sel&&sel.u&&S.u.find(u=>u.id==sel.u);
+ if(su&&su.o==S.k&&!S.over){const[px,py]=pp(su);g.fillStyle='rgba(80,160,255,.4)';for(const i of reach(su).keys())g.fillRect(i%N*C,(i/N|0)*C,C,C);
+  g.fillStyle='rgba(255,50,50,.18)';for(let dx=-su.rng;dx<=su.rng;dx++)for(let dy=-(su.rng-Math.abs(dx));dy<=su.rng-Math.abs(dx);dy++)g.fillRect((px+dx)*C,(py+dy)*C,C,C)}
+ for(const u of S.u){g.fillStyle=C1[u.o];g.beginPath();g.arc(u.x*C+8,u.y*C+9,6,0,7);g.fill();g.strokeStyle=C2[u.o];g.lineWidth=2;g.stroke();g.lineWidth=1;
+  g.fillStyle=C2[u.o]=='#111'||C2[u.o]=='#dc2626'?'#fff':'#000';g.font='bold 8px sans-serif';g.fillText(u.t.slice(0,2),u.x*C+3,u.y*C+12);bar(u.x,u.y,u.hp,u.mh);
+  if(sel&&sel.u==u.id){g.strokeStyle='#fff';g.strokeRect(u.x*C,u.y*C,C,C)}}
+ if(S.round>3){g.fillStyle=`rgba(0,0,30,${Math.min(.4,(S.round-3)*.07)})`;g.fillRect(0,0,800,800)}}
+function panel(){if(!sel)return'Click one of your units or buildings.';let h='';
+ if(sel.u){const u=S.u.find(v=>v.id==sel.u);if(!u)return'';
+  h=`<b>${u.t}</b> (${KN[u.o]})<br>HP ${u.hp}/${u.mh} · Damage ${u.dmg}<br>Move ${u.mv} · Attack range ${u.rng} · Move ${u.ap} AP · Attack ${u.aa} AP${u.bo?' · buildings only':''}`;
+  if(u.o==S.k){h+=u.t=='Healer'?'<br>Click an allied unit within the 5×5 area to heal 3 HP, or a blue cell to move.':u.t=='Mage'?`<br>Blue cell = move. <button onclick="mode='mage';toast('Click a target cell (range 3)')">Cast area attack (9 / 8 dmg, 3×3)</button>`:'<br>Click a blue cell to move, or an enemy in range to attack.';if(UPC[u.t]&&!u.up)h+=`<br><button onclick="tx({t:'act',o:{k:'uup',id:${u.id}}})">Upgrade unit (${UPC[u.t]}g)</button>`}}
+ else{const b=S.b.find(v=>v.id==sel.b);if(!b)return'';h=`<b>${b.t}</b> (${KN[b.o]})<br>Level ${b.lv} · HP ${b.hp}/${b.mh}`;
+  if(b.o==S.k){const c=ucost(b);if(c)h+=`<br><button onclick="tx({t:'act',o:{k:'up',bid:${b.id}}})">Upgrade (${c}g)</button>`;
+   if(b.t=='Barracks'||b.t=='Workshop')for(const t in RC)if(!!RC[t][2]==(b.t=='Workshop')&&RC[t][1]<=b.lv)h+=`<br><button onclick="tx({t:'act',o:{k:'rec',bid:${b.id},t:'${t}'}})">Recruit ${t} (${RC[t][0]}g)</button>`}}
+ return h}
+function hud(){const r=Math.max(0,(S.dl-(Date.now()+off))/1000|0);
+ return`<b style="color:${C1[S.k]}">${KN[S.k]}</b><br>💰 ${S.gold} · Round ${S.round} · ⏱ <span id=tm>${r/60|0}:${String(r%60).padStart(2,'0')}</span> · AP ${S.ap}/${S.apMax}<br>`+
+ S.pl.map(p=>`<span style="color:${C1[p.k]}">${p.name}${p.done?'✓':''}${p.alive?'':'✗'}</span>`).join(' ')+'<br>'+
+ (S.alive?`<button onclick="tx({t:'done'})" ${S.done?'disabled':''}>${S.done?'Waiting...':'End Turn'}</button><br>
+ <button ${S.round>5&&!S.fu?'':'disabled'} onclick="mode='fire';toast('Click a target for Fireball')">🔥 Fireball${S.round>5?'':' (R6)'}</button>
+ <button ${S.round>7&&!S.au?'':'disabled'} onclick="mode='arrows';toast('Click a target for Fire Arrows')">🏹 Fire Arrows${S.round>7?'':' (R8)'}</button>`:'<b>Eliminated - spectating</b>')}
+function render(){if(!S)return;$('side').innerHTML=`<button style="float:right" onclick="setMute(!mute)">${mute?'🔇':'🔊'}</button>`+hud()+`<div class=box>${panel()}</div><div class=box><b>Queued orders</b><br>`+
+ S.orders.map((o,i)=>`${o.k} ${o.t||''} ${o.id||o.bid||''} ${o.k=='move'||o.k=='spell'?`(${o.x},${o.y})`:''} [${o.ap}AP] <button style="padding:0 6px;margin:0" onclick="tx({t:'cancel',i:${i}})">✕</button><br>`).join('')+
+ `</div><div class="box log"><b>Event log</b><br>${S.log.slice().reverse().slice(0,14).join('<br>')}</div>`;draw()}
+cv.onclick=e=>{if(!S||S.over||!S.alive)return;const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/C|0,y=(e.clientY-r.top)/C|0;
+ if(mode=='mage'){tx({t:'act',o:{k:'mage',id:sel.u,x,y}});mode=null;return}
+ if(mode){tx({t:'act',o:{k:'spell',s:mode,x,y}});mode=null;return}
+ const u=S.u.find(u=>u.x==x&&u.y==y),b=S.b.find(b=>b.x==x&&b.y==y),t=u||b,su=sel&&sel.u&&S.u.find(v=>v.id==sel.u);
+ if(su&&su.o==S.k){
+  if(su.t=='Healer'&&u&&u.o==S.k&&u.id!=su.id){tx({t:'act',o:{k:'heal',id:su.id,tid:u.id}});return}
+  if(t&&t.o!=S.k){const[px,py]=pp(su);if(Math.abs(t.x-px)+Math.abs(t.y-py)>su.rng)return toast('Target out of range');
+   if(confirm(`${su.t} attacks ${t.t} (HP ${t.hp}/${t.mh}).\nExpected damage: ${su.dmg} → ${Math.max(0,t.hp-su.dmg)} HP left${t.hp<=su.dmg?' (destroyed)':''}.\nCost: ${su.ap} AP`))tx({t:'act',o:{k:'atk',id:su.id,tt:u?'u':'b',tid:t.id}});return}
+  if(!t){tx({t:'act',o:{k:'move',id:su.id,x,y}});return}}
+ sel=u?{u:u.id}:b?{b:b.id}:null;render()};
+// ---- sound (WebAudio, synthesized: no files, no music) ----
+let AC,nz,wG,rG,mute=localStorage.getItem('fkm')=='1',vol=+(localStorage.getItem('fkv')||.6),lr=0,anims=[];
+function ac(){if(!AC){AC=new(window.AudioContext||window.webkitAudioContext)();nz=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate);const d=nz.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+ wG=noise(0,400,'lowpass',1,1);rG=noise(0,3000,'highpass',1,1);applyVol()}if(AC.state=='suspended')AC.resume();return AC}
+function noise(dur,f,type,gain,loop){const c=AC,s=c.createBufferSource(),fl=c.createBiquadFilter(),gn=c.createGain(),v=gain*vol*(mute?0:1);s.buffer=nz;s.loop=!!loop;fl.type=type;fl.frequency.value=f;gn.gain.setValueAtTime(Math.max(v,.0002),c.currentTime);
+ s.connect(fl);fl.connect(gn);gn.connect(c.destination);s.start();if(!loop){gn.gain.exponentialRampToValueAtTime(.0001,c.currentTime+dur);s.stop(c.currentTime+dur)}return gn}
+function tone(f0,f1,dur,gain,type){const c=AC,o=c.createOscillator(),gn=c.createGain();o.type=type||'sine';o.frequency.setValueAtTime(f0,c.currentTime);o.frequency.exponentialRampToValueAtTime(f1,c.currentTime+dur);
+ gn.gain.setValueAtTime(Math.max(gain*vol*(mute?0:1),.0002),c.currentTime);gn.gain.exponentialRampToValueAtTime(.0001,c.currentTime+dur);o.connect(gn);gn.connect(c.destination);o.start();o.stop(c.currentTime+dur)}
+function applyVol(){if(!AC)return;const m=mute?0:vol;wG.gain.value=.06*m;rG.gain.value=(S&&S.round>3?.1:0)*m}
+function snd(k){if(!AC||mute)return;
+ if(k=='sword'){noise(.12,2500,'bandpass',.3);tone(320,140,.08,.1,'square')}
+ else if(k=='arrow'){noise(.18,5000,'highpass',.2);tone(900,300,.12,.05)}
+ else if(k=='boom'){noise(.7,300,'lowpass',.8);tone(90,30,.6,.4)}
+ else if(k=='crumble'){noise(.55,800,'lowpass',.5)}
+ else if(k=='death'){tone(420,90,.3,.15,'sawtooth');noise(.1,2500,'bandpass',.2)}}
+function setMute(v){mute=!!v;localStorage.setItem('fkm',mute?1:0);applyVol();S&&render()}
+function setVol(v){vol=+v;localStorage.setItem('fkv',v);applyVol()}
+document.addEventListener('pointerdown',()=>ac());
+setInterval(()=>{if(AC&&!mute&&S&&S.round<=3&&Math.random()<.5){const f=2000+Math.random()*1500;tone(f,f*1.4,.1,.04);setTimeout(()=>tone(f*1.1,f*1.5,.1,.04),140)}},2500); // birds in sunny weather
+const kind=t=>/Fireball|Fire Arrows|mage blasted|eliminated/.test(t)?'boom':/destroyed a (Wall|Gate|Tower|House|Barracks|Workshop|GoldMine|TrainingYard|TownHall)/.test(t)?'crumble':/destroyed a /.test(t)?'death':/ shot a /.test(t)?'arrow':/ struck a /.test(t)?'sword':null;
+function fxStep(){const rr=S.round+S.over;if(lr&&rr>lr)S.fx.slice(0,12).forEach((e,i)=>{const k=kind(e.t);if(k)setTimeout(()=>{snd(k);anims.push({x:e.x,y:e.y,k,t0:performance.now()})},i*120)});lr=rr;applyVol()}
+// ---- rain + combat animation overlay ----
+const fc=$('fx').getContext('2d'),drops=Array.from({length:140},()=>({x:Math.random()*800,y:Math.random()*800,s:8+Math.random()*8}));
+setInterval(()=>{fc.clearRect(0,0,800,800);if(!S)return;const now=performance.now();
+ if(S.round>3){fc.strokeStyle='rgba(190,210,255,.45)';fc.beginPath();for(const d of drops){fc.moveTo(d.x,d.y);fc.lineTo(d.x-2,d.y+d.s);d.y+=d.s*1.2;d.x-=1;if(d.y>800){d.y=-10;d.x=Math.random()*820}}fc.stroke()}
+ anims=anims.filter(a=>now-a.t0<900);fc.lineWidth=3;for(const a of anims){const p=(now-a.t0)/900;fc.strokeStyle=a.k=='boom'?`rgba(255,140,30,${1-p})`:a.k=='crumble'?`rgba(200,200,200,${1-p})`:`rgba(255,255,255,${1-p})`;fc.beginPath();fc.arc(a.x*C+8,a.y*C+8,4+p*(a.k=='boom'?36:14),0,7);fc.stroke()}fc.lineWidth=1},50);
+setInterval(()=>{if(S&&!S.over){const r=Math.max(0,(S.dl-(Date.now()+off))/1000|0),e=$('tm');if(e)e.textContent=(r/60|0)+':'+String(r%60).padStart(2,'0')}},250);
+</script></body></html>
